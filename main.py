@@ -41,7 +41,7 @@ async def start(update: Update, context: CallbackContext) -> None:
     custom_keyboard = [[location_keyboard]]
     reply_markup = ReplyKeyboardMarkup(custom_keyboard)
     await update.message.reply_text(
-        'Please share your location to start.',
+        'Please share your location to start. Make sure precise location sharing is enabled.',
         reply_markup=reply_markup
     )
     context.user_data['state'] = 'LOCATION'
@@ -50,9 +50,6 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
     if context.user_data['state'] == 'LOCATION':
         user_location = update.message.location
         context.user_data['LOCATION'] = user_location
-        print(user_location)
-        print(context.user_data)
-
         await update.message.reply_text(
             'Thanks for sharing your location. Now, hit the paperclip and choose the location you want to get to.'
         )
@@ -61,48 +58,110 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
     elif context.user_data['state'] == 'DESTINATION':
         user_destination = update.message.location
         context.user_data['DESTINATION'] = user_destination
-        await update.message.reply_text('How much do you want to pay for the ride?')
-        print(update.message.location)
-        print(context.user_data)
-        context.user_data['state'] = 'PRICE'
+        await update.message.reply_text('How many euros do you want to pay for the ride? Write in numbers only, for example 5 or 10.')
+        context.user_data['state'] = 'AWAITING_PRICE'
 
 async def handle_price(update: Update, context: CallbackContext) -> None:
-    price = update.message.text
-    context.user_data['price'] = price
-    await update.message.reply_text('Thanks! You want to pay {} for the ride.'.format(price))
-
-    # Send user location, destination and price to the biker
-    for chat_id in biker_ids:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text='User location: {}, {}. Destination: {}, {}. Price: {}.'.format(
-                context.user_data['location'].latitude,
-                context.user_data['location'].longitude,
-                context.user_data['destination'].latitude,
-                context.user_data['destination'].longitude,
-                context.user_data['price'],
-            )
-        )
 
     # Get driving route from Google Maps Directions API
-    # response = requests.get(
-    #     'https://maps.googleapis.com/maps/api/directions/json',
-    #     params={
-    #         'origin': f'{user_location.latitude},{user_location.longitude}',
-    #         'destination': f'{destination.latitude},{destination.longitude}',
-    #         'key': GOOGLE_MAPS_API_KEY,
-    #     },
-    # )
-    # data = response.json()
+    route = requests.get(
+            'https://maps.googleapis.com/maps/api/directions/json',
+            params={
+                'origin': f"{context.user_data['LOCATION'].latitude},{context.user_data['LOCATION'].longitude}",
+                'destination': f"{context.user_data['DESTINATION'].latitude}, {context.user_data['DESTINATION'].longitude}",
+                'key': GOOGLE_MAPS_API_KEY,
+            },
+            )
+    
+    location_address = gmaps.reverse_geocode((context.user_data['LOCATION'].latitude, context.user_data['LOCATION'].longitude))
+    destination_address = gmaps.reverse_geocode((context.user_data['DESTINATION'].latitude, context.user_data['DESTINATION'].longitude))
+    # Clean geocode to only include formatted address
+    location_address = ','.join(location_address[0]['formatted_address'].split(',')[:3]).strip()
+    destination_address = ','.join(destination_address[0]['formatted_address'].split(',')[:3]).strip()
+    print(gmaps.reverse_geocode((context.user_data['DESTINATION'].latitude, context.user_data['DESTINATION'].longitude))[0]['formatted_address'])
+    
+    # Check if the route request was successful
+    if route.status_code == 200:
+        directions = route.json()
 
-    # # Send route to the biker
-    # await context.bot.send_message(chat_id=BIKER_ID, text=json.dumps(data['routes'][0]['legs'][0]['steps']))
+        # Check if a route was found
+        if directions['routes']:
+            # Get the first (best) route
+            route = directions['routes'][0]
+
+            # Get the overview polyline
+            polyline = route['overview_polyline']['points']
+
+            # Generate a static map URL with the route
+            static_map_url = f"https://maps.googleapis.com/maps/api/staticmap?size=600x600&path=enc:{polyline}&key={GOOGLE_MAPS_API_KEY}"
+
+        else:
+            await context.bot.send_message(
+                chat_id=update.message.chat_id,
+                text="Sorry, I couldn't find a route for your trip. Please try again later."
+            )
+
+    else:
+        await context.bot.send_message(
+            chat_id=update.message.chat_id,
+            text="Sorry, I couldn't get the directions for your trip."
+        )
+
+    if context.user_data['state'] == 'AWAITING_PRICE':
+        price = update.message.text
+        if price and price.isdigit():
+            context.user_data['PRICE'] = int(price)
+            context.user_data['state'] = 'PRICE'
+            await update.message.reply_text(f'Bikers have been notified of a €{price} ride! The higher the price, the faster they come!')
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton('Accept Pick-Up Request', callback_data='accept')]])
+            # Send user location, destination and price to the biker
+            for chat_id in biker_ids:
+                # Skip if user == biker
+                if int(chat_id) != int(update.message.from_user.id): 
+                    # Send the route to every biker
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=static_map_url
+                    ) 
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text='€{} PICK AND DROP! Pick-up: {}. Drop-off: {}.'.format(
+                            context.user_data['PRICE'],
+                            location_address,
+                            destination_address
+                        ),
+                        reply_markup=keyboard
+                    )
+        else: 
+            await update.message.reply_text('Please write the price in numbers only, for example 5 or 10.')
+
+async def accept_request(update: Update, context: CallbackContext):
+    # Get the callback query
+    query = update.callback_query
+
+    # Get the biker's location (replace with actual location)
+
+    # Send a message to the user
+    context.bot.send_message(chat_id=query.message.chat_id,
+                             text="A biker has accepted your pick-up request.")
+    
+    # Ask the biker to share their live location
+    context.bot.send_message(chat_id=query.from_user.id,
+                             text="Please share your live location to start the ride.")
+
+    # Share the biker's live location with the user
+    context.bot.send_location(chat_id=query.message.chat_id,
+                              latitude=update.message.location.latitude,
+                              longitude=update.message.location.longitude,
+                              live_period=86400)  # Live for 24 hours
         
 async def join(update: Update, context: CallbackContext) -> None:
     context.user_data['state'] = 'CITY'
     chat_id = update.effective_chat.id
     if str(chat_id) not in biker_ids:
         context.user_data['chat_id'] = chat_id
+        context.user_data['state'] = 'CITY'
+        
         save_chat_ids(biker_ids)
         await update.message.reply_text(f'Joined the biker gang {chat_id}. To start receiving orders, write the name of the city you currently ride in.')
     else:
@@ -111,12 +170,14 @@ async def join(update: Update, context: CallbackContext) -> None:
         save_chat_ids(biker_ids)
 
 async def handle_city(update: Update, context: CallbackContext) -> None:
+    if context.user_data.get('state') == 'AWAITING_PRICE':
+        return
     if context.user_data.get('state') == 'CITY':
         city = update.message.text
         biker_id = context.user_data['chat_id']
         biker_ids[str(biker_id)] = city
         save_chat_ids(biker_ids)
-        await update.message.reply_text('Your city has been saved.')
+        await update.message.reply_text('Your city has been saved. You will be notified when someone needs a ride in {}'.format(city))
         context.user_data['state'] = 'IDLE'
 
 async def help_command(update: Update):
@@ -248,8 +309,8 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('join', join))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
-    app.add_handler(MessageHandler(filters.TEXT, handle_city))
     app.add_handler(MessageHandler(filters.TEXT, handle_price))
+    app.add_handler(MessageHandler(filters.TEXT, handle_city))
     app.add_handler(CommandHandler('help', help_command))
     app.add_handler(CommandHandler('saskaita', invoice_command))
     # app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
