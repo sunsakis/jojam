@@ -1,16 +1,16 @@
 from typing import Final
-from telegram import ForceReply, Update, PreCheckoutQuery, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackContext, PreCheckoutQueryHandler, CallbackQueryHandler
+from telegram import ForceReply, Update, PreCheckoutQuery
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackContext, PreCheckoutQueryHandler
 from dotenv import load_dotenv
 import googlemaps
 import os, logging
 import requests
 import json
 
-# Enable logging
+# Enable logging to bot.log
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+    filename='bot.log', level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
 # set higher logging level for httpx to avoid all GET and POST requests being logged
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
@@ -21,7 +21,8 @@ def load_chat_ids():
     try:
         with open('chat_ids.json', 'r') as f:
             return json.load(f)
-    except FileNotFoundError:
+    except FileNotFoundError as e:
+        logging.error(f'Biker db error: {e}')
         return {}
 
 def save_chat_ids(chat_ids):
@@ -41,7 +42,7 @@ ride_requests = {}
 
 async def start(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text(
-        'Hit the paperclip and send your location to be picked up by a biker.'
+        'Hit the paperclip and send your Location to be picked up by a biker.'
     )
     context.user_data['state'] = 'USER_LOCATION'
     
@@ -52,14 +53,14 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
         user_location = update.message.location
         context.user_data['USER_LOCATION'] = user_location
         await update.message.reply_text(
-            'Thanks for sharing your pick-up location. Now, hit the paperclip again and choose where you want to go to.'
+            'Thanks for sharing your pick-up location. Now, hit the paperclip again and drop the pin on the Location you want to go to.'
         )
         context.user_data['state'] = 'DESTINATION'
 
     elif context.user_data['state'] == 'DESTINATION':
         user_destination = update.message.location
         context.user_data['DESTINATION'] = user_destination
-        await update.message.reply_text('Bikers have been notified of your request to ride. When a biker accepts your request, they will let you know the price and estimated time of arrival.')
+        await update.message.reply_text('Bikers have been notified. When a biker accepts your request, they will let you know the price and estimated time of arrival.')
         global user_id
         user_id = update.message.from_user.id
          # Get driving route from Google Maps Directions API
@@ -160,21 +161,6 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
             message_id=context.user_data['message_id']
         )
 
-
-async def join(update: Update, context: CallbackContext) -> None:
-    context.user_data['state'] = 'CITY'
-    chat_id = update.effective_chat.id
-    if str(chat_id) not in biker_ids:
-        context.user_data['chat_id'] = chat_id
-        context.user_data['state'] = 'CITY'
-        
-        save_chat_ids(biker_ids)
-        await update.message.reply_text(f'Joined the biker gang {chat_id}. To start receiving orders, write the name of the city you currently ride in.')
-    else:
-        await update.message.reply_text(f'Already in the biker gang {chat_id}. Write the name of the city you currently ride in.')
-        context.user_data['chat_id'] = chat_id
-        save_chat_ids(biker_ids)
-
 async def handle_city(update: Update, context: CallbackContext) -> None:
     if context.user_data.get('state') == 'AWAITING_PRICE':
         return
@@ -189,18 +175,31 @@ async def handle_city(update: Update, context: CallbackContext) -> None:
 async def help():
     return 'Contact @sunsakis if you need any assistance.'
 
+async def join(update: Update, context: CallbackContext) -> None:
+    context.user_data['state'] = 'CITY'
+    chat_id = update.effective_chat.id
+    name = update.effective_user.first_name
+    if str(chat_id) not in biker_ids:
+        context.user_data['chat_id'] = chat_id
+        context.user_data['state'] = 'CITY'
+        
+        save_chat_ids(biker_ids)
+        await update.message.reply_text(f'Welcome to the biker gang, {name}. Write the name of the city you currently ride in.')
+    else:
+        await update.message.reply_text(f'Already in the biker gang, {name}. Write the name of the city you currently ride in.')
+        context.user_data['chat_id'] = chat_id
+        save_chat_ids(biker_ids)
+
 async def invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Extract the price from the command message
     command_text = update.message.text.split()
     if len(command_text) < 3:
-        #await update.message.reply_text('Please provide the price in cents when invoicing. For example: "/invoice 700" sends an invoice for 7.00 EUR')
         await update.message.reply_text('When writing an /invoice command, you need to write the amount to charge and how quickly after payment can you pick the customer up. For example: "/invoice 700 5" sends an invoice for 7.00 EUR and lets your customer know you will arrive within 5 minutes after they make the payment. /invoice <price in cents> <time in minutes>')
         return
     try:
         invoice_price = int(command_text[1])
         min = int(command_text[2])
     except ValueError:
-        #await update.message.reply_text('Please provide a valid price')
         await update.message.reply_text('Please provide a valid price')
         return
 
@@ -258,7 +257,7 @@ async def precheckout_callback(update: Update, context: CallbackContext):
         )
     except Exception as e:
         # Log the error
-        print(f"An error occurred while processing the payment: {e}")
+        logging.error(f"An error occurred while processing the payment: {e}")
         # Answer the pre-checkout query with an error message
         await query.answer(ok=False, error_message="An error occurred while processing your payment. Please try again.")
         return
@@ -268,8 +267,10 @@ async def precheckout_callback(update: Update, context: CallbackContext):
 
 async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 print(f'Update {update} caused error {context.error}')
+                logging.error(f'Update {update} caused error {context.error}')
 
 if __name__ == '__main__':
+    logging.info('Babushka is waking up...')
     print("Babushka is waking up...")
     app = Application.builder().token(TOKEN).build()
 
@@ -285,4 +286,4 @@ if __name__ == '__main__':
     app.add_error_handler(error)
 
     #Waiting
-    app.run_polling(poll_interval=1)
+    app.run_polling(poll_interval=2)
