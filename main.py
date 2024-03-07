@@ -87,17 +87,15 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
             if directions['routes']:
                 # Get the first (best) route
                 route = directions['routes'][0]
-
                 # Get the overview polyline
                 polyline = route['overview_polyline']['points']
-
                 # Generate a static map URL with the route
                 static_map_url = f"https://maps.googleapis.com/maps/api/staticmap?size=600x600&path=enc:{polyline}&key={GOOGLE_MAPS_API_KEY}"
 
             else:
                 await context.bot.send_message(
                     chat_id=update.message.chat_id,
-                    text="Sorry, I couldn't find a route for your trip. Please try again later."
+                    text="Sorry, I couldn't find a route for your trip. Please try again."
                 )
 
         else:
@@ -258,11 +256,7 @@ async def precheckout_callback(update: Update, context: CallbackContext):
              )
         # Notify the seller
         await context.bot.send_message(
-            chat_id=biker_id, text=f"Good news! The payment went through. Now go get your rider! In case you need to call them, their Telegram phone number is {query.order_info['phone_number']}. Their name is {query.order_info['name']}."
-        )
-        # Notify Teo
-        await context.bot.send_message(
-            chat_id='812832007', text=f"~$PAYMENT order_info: {query.order_info}"
+            chat_id=biker_id, text=f"Good news! The payment went through. Now go get your rider! In case you need to contact them, their Telegram phone number is {query.order_info['phone_number']}."
         )
     except Exception as e:
         # Log the error
