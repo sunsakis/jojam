@@ -1,5 +1,5 @@
 from typing import Final
-from telegram import ForceReply, Update, PreCheckoutQuery
+from telegram import ForceReply, Update, PreCheckoutQuery, SuccessfulPayment
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackContext, PreCheckoutQueryHandler
 from dotenv import load_dotenv
 import googlemaps
@@ -19,14 +19,14 @@ load_dotenv()
 
 def load_chat_ids():
     try:
-        with open('chat_ids.json', 'r') as f:
+        with open('biker_ids.json', 'r') as f:
             return json.load(f)
     except FileNotFoundError as e:
         logging.error(f'Biker db error: {e}')
         return {}
 
 def save_chat_ids(chat_ids):
-    with open('chat_ids.json', 'w') as f:
+    with open('biker_ids.json', 'w') as f:
         json.dump(chat_ids, f)
 
 gmaps = googlemaps.Client(key=os.getenv('GOOGLE_MAPS_API_KEY'))
@@ -42,7 +42,7 @@ ride_requests = {}
 
 async def start(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text(
-        'Hit the paperclip and send your Location to be picked up by a biker.'
+        'Hit the paperclip icon and choose the precise Location where the biker should come.'
     )
     context.user_data['state'] = 'USER_LOCATION'
     
@@ -53,14 +53,14 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
         user_location = update.message.location
         context.user_data['USER_LOCATION'] = user_location
         await update.message.reply_text(
-            'Thanks for sharing your pick-up location. Now, hit the paperclip again and drop the pin on the Location you want to go to.'
+            'Thanks for sharing your pick-up location. Now hit paperclip -> Location again and use the map to drop a pin on your destination.'
         )
         context.user_data['state'] = 'DESTINATION'
 
     elif context.user_data['state'] == 'DESTINATION':
         user_destination = update.message.location
         context.user_data['DESTINATION'] = user_destination
-        await update.message.reply_text('Bikers have been notified. When a biker accepts your request, they will let you know the price and estimated time of arrival.')
+        await update.message.reply_text('Great. Bikers have been notified of your ride request. Give some time for one of them to respond.')
         global user_id
         user_id = update.message.from_user.id
          # Get driving route from Google Maps Directions API
@@ -169,7 +169,9 @@ async def handle_city(update: Update, context: CallbackContext) -> None:
         biker_id = context.user_data['chat_id']
         biker_ids[str(biker_id)] = city
         save_chat_ids(biker_ids)
-        await update.message.reply_text('Your city has been saved. You will be notified when someone needs a ride in {}'.format(city))
+        await update.message.reply_text('You will be notified when someone needs a motorcycle ride in {}.'.format(city))
+        invite_link = 'https://t.me/+Vt6wj3ww_LY5NDI8'
+        await update.message.reply_text(f'[Join the biker gang chat group:]({invite_link})', parse_mode='Markdown')
         context.user_data['state'] = 'IDLE'
 
 async def help():
@@ -182,11 +184,10 @@ async def join(update: Update, context: CallbackContext) -> None:
     if str(chat_id) not in biker_ids:
         context.user_data['chat_id'] = chat_id
         context.user_data['state'] = 'CITY'
-        
         save_chat_ids(biker_ids)
-        await update.message.reply_text(f'Welcome to the biker gang, {name}. Write the name of the city you currently ride in.')
+        await update.message.reply_text(f'Welcome to the biker gang, {name}. Write the name of the city you ride in.')
     else:
-        await update.message.reply_text(f'Already in the biker gang, {name}. Write the name of the city you currently ride in.')
+        await update.message.reply_text(f'Already in the biker gang, {name}. Write the name of the city you ride in.')
         context.user_data['chat_id'] = chat_id
         save_chat_ids(biker_ids)
 
@@ -194,11 +195,15 @@ async def invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Extract the price from the command message
     command_text = update.message.text.split()
     if len(command_text) < 3:
-        await update.message.reply_text('When writing an /invoice command, you need to write the amount to charge and how quickly after payment can you pick the customer up. For example: "/invoice 700 5" sends an invoice for 7.00 EUR and lets your customer know you will arrive within 5 minutes after they make the payment. /invoice <price in cents> <time in minutes>')
+        await update.message.reply_text("When writing an /invoice, you need to write the amount to pay and how quickly you will pick the customer up. For example '/invoice 700 5' sends an invoice for €7.00 and lets your customer know you will arrive within 5 minutes after they pay. Form - /invoice <price in cents> <time in minutes>")
         return
     try:
         invoice_price = int(command_text[1])
         min = int(command_text[2])
+        # Price cannot be smaller than 100 cents
+        if invoice_price < 100:
+            await update.message.reply_text("Invoice must be at least 100 cents. You don't want your ride to be worth less than €1, do you?")
+            return
     except ValueError:
         await update.message.reply_text('Please provide a valid price')
         return
@@ -218,7 +223,7 @@ async def invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if message_id in ride_requests:
             # Get userID of the ride request initiator
             user_id = ride_requests[message_id]
-            print(ride_requests)
+            # Send the invoice
             await context.bot.send_invoice(
                 chat_id= user_id,  # ID of the user to send the invoice to
                 title= "Permission To Ride",
@@ -231,14 +236,14 @@ async def invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 send_phone_number_to_provider=True,
             )
             #await update.message.reply_text(f'Invoice sent for {price_in_eur} euros')
-            await update.message.reply_text(f'Invoice sent for {price_in_eur} euros. You will be notified as soon as they pay, after which you will have {min} minutes to pick them up.')
+            await update.message.reply_text(f'Invoice sent for {price_in_eur} euros. You will be notified as soon as it is paid, after which you will have {min} min to pick your customer up. If you do not pick them up within the time window you set, the payment might be refunded and you might be banned from the biker gang.')
     else:
         #await update.message.reply_text("You need to reply to a customer's message to send them an invoice")
         await update.message.reply_text("You need to reply to a ride request to send an invoice")
 
 async def precheckout_callback(update: Update, context: CallbackContext):
     query: PreCheckoutQuery = update.pre_checkout_query
-    print(query.order_info)
+    print(query)
     # Check the payload, is this from your bot?
     if query.invoice_payload != "Ride":
         await query.answer(ok=False, error_message="Something went wrong...")
@@ -253,7 +258,11 @@ async def precheckout_callback(update: Update, context: CallbackContext):
              )
         # Notify the seller
         await context.bot.send_message(
-            chat_id=biker_id, text=f"Good news! The payment went through. Go get your rider!"
+            chat_id=biker_id, text=f"Good news! The payment went through. Now go get your rider! In case you need to call them, their Telegram phone number is {query.order_info['phone_number']}. Their name is {query.order_info['name']}."
+        )
+        # Notify Teo
+        await context.bot.send_message(
+            chat_id='812832007', text=f"~$PAYMENT order_info: {query.order_info}"
         )
     except Exception as e:
         # Log the error
@@ -264,6 +273,14 @@ async def precheckout_callback(update: Update, context: CallbackContext):
 
     # If no errors occurred, answer the pre-checkout query with ok=True
     await query.answer(ok=True)
+
+async def successful_payment_callback(update: Update, context: CallbackContext) -> None:
+    successful_payment: SuccessfulPayment = update.message.successful_payment
+    # Now you can use the information in the SuccessfulPayment object
+    await context.bot.send_message(
+        chat_id='812832007',
+        text=f"~$UCCE$$: {successful_payment}"
+    )
 
 async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 print(f'Update {update} caused error {context.error}')
@@ -281,6 +298,7 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.TEXT, handle_city))
     app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
+    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback))
 
     # Errors
     app.add_error_handler(error)
