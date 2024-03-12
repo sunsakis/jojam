@@ -42,10 +42,15 @@ ride_requests = {}
 
 async def start(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text(
-        'Hit the paperclip icon and choose the precise Location where the biker should come.'
+        'Click 🧷 icon, then 📍 Location and choose a spot to be picked up from'
     )
     context.user_data['state'] = 'USER_LOCATION'
-    
+    # Delete message after response
+    await context.bot.delete_message(
+        chat_id=update.message.chat_id,
+        message_id=update.message.message_id
+    )
+
 async def handle_location(update: Update, context: CallbackContext) -> None:
     print(context.user_data['state'])
     print(update.message.location)
@@ -53,14 +58,13 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
         user_location = update.message.location
         context.user_data['USER_LOCATION'] = user_location
         await update.message.reply_text(
-            'Thanks for sharing your pick-up location. Now hit paperclip -> Location again and use the map to drop a pin on your destination.'
+            'Thanks for sharing your pick-up location. Now click 🧷 icon, then 📍 Location again, and 📌 pin your destination on the map'
         )
         context.user_data['state'] = 'DESTINATION'
 
     elif context.user_data['state'] == 'DESTINATION':
         user_destination = update.message.location
         context.user_data['DESTINATION'] = user_destination
-        await update.message.reply_text('Great. Bikers have been notified of your ride request. Give some time for one of them to respond.')
         global user_id
         user_id = update.message.from_user.id
          # Get driving route from Google Maps Directions API
@@ -91,17 +95,17 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
                 polyline = route['overview_polyline']['points']
                 # Generate a static map URL with the route
                 static_map_url = f"https://maps.googleapis.com/maps/api/staticmap?size=600x600&path=enc:{polyline}&key={GOOGLE_MAPS_API_KEY}"
-
+                await update.message.reply_text('👍 Great! Motorcyclists have been notified of your ride request 🏍 Give some time for one of them to respond 🏁 If you want to start over, type /start')
+            
             else:
                 await context.bot.send_message(
                     chat_id=update.message.chat_id,
-                    text="Sorry, I couldn't find a route for your trip. Please try again."
+                    text="Sorry, I couldn't find a route for your trip. Please try again"
                 )
-
         else:
             await context.bot.send_message(
                 chat_id=update.message.chat_id,
-                text="Sorry, I couldn't get the directions for your trip."
+                text="Sorry, I couldn't get the directions for your trip"
         )
             
         # Send user location, destination and price to the biker
@@ -115,7 +119,8 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
                 ) 
                 msg = await context.bot.send_message(
                     chat_id=chat_id,
-                    text='NEW RIDE REQUEST! Pick-up: {}. Drop-off: {}.'.format(
+                    text='NEW RIDE REQUEST from {}! Pick-up: {}. Drop-off: {}.'.format(
+                        update.message.from_user.first_name,
                         location_address,
                         destination_address
                     ),
@@ -143,7 +148,7 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
 
         await context.bot.send_message(
             chat_id=user_id,
-            text='Your biker is on the way!'
+            text='Your motorcycle is on the way!'
         )
         context.user_data['state'] = 'ON_THE_WAY'
 
@@ -167,13 +172,13 @@ async def handle_city(update: Update, context: CallbackContext) -> None:
         biker_id = context.user_data['chat_id']
         biker_ids[str(biker_id)] = city
         save_chat_ids(biker_ids)
-        await update.message.reply_text('You will be notified when someone needs a motorcycle ride in {}.'.format(city))
+        await update.message.reply_text('You will be notified when someone needs a motorcycle ride in {}'.format(city))
         invite_link = 'https://t.me/+Vt6wj3ww_LY5NDI8'
-        await update.message.reply_text(f'[Join the biker gang chat group:]({invite_link})', parse_mode='Markdown')
+        await update.message.reply_text(f'[Join the biker gang:]({invite_link})', parse_mode='Markdown')
         context.user_data['state'] = 'IDLE'
 
 async def help():
-    return 'Contact @sunsakis if you need any assistance.'
+    return 'Contact @sunsakis if you need anything'
 
 async def join(update: Update, context: CallbackContext) -> None:
     context.user_data['state'] = 'CITY'
@@ -183,9 +188,9 @@ async def join(update: Update, context: CallbackContext) -> None:
         context.user_data['chat_id'] = chat_id
         context.user_data['state'] = 'CITY'
         save_chat_ids(biker_ids)
-        await update.message.reply_text(f'Welcome to the biker gang, {name}. Write the name of the city you ride in.')
+        await update.message.reply_text(f'Welcome to the biker gang, {name}. Write the name of the city you ride in')
     else:
-        await update.message.reply_text(f'Already in the biker gang, {name}. Write the name of the city you ride in.')
+        await update.message.reply_text(f'Already in the gang, {name}. Write the name of the city you ride in')
         context.user_data['chat_id'] = chat_id
         save_chat_ids(biker_ids)
 
@@ -225,7 +230,7 @@ async def invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_invoice(
                 chat_id= user_id,  # ID of the user to send the invoice to
                 title= "Permission To Ride",
-                description= f'Pick-up within {min}min after payment.',
+                description= f'Pick-up within {min}min after payment',
                 payload= 'Ride',
                 provider_token= STRIPE_TOKEN,
                 start_parameter= 'start_parameter',
@@ -234,7 +239,7 @@ async def invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 send_phone_number_to_provider=True,
             )
             #await update.message.reply_text(f'Invoice sent for {price_in_eur} euros')
-            await update.message.reply_text(f'Invoice sent for {price_in_eur} euros. You will be notified as soon as it is paid, after which you will have {min} min to pick your customer up. If you do not pick them up within the time window you set, the payment might be refunded and you might be banned from the biker gang.')
+            await update.message.reply_text(f'💸 Invoice sent for €{price_in_eur} ⏱ You will be notified as soon as it is paid, after which you will have {min} min to pick your customer up ☠️ If you do not pick them up within that time window, the payment can be refunded and you might be penalized')
     else:
         #await update.message.reply_text("You need to reply to a customer's message to send them an invoice")
         await update.message.reply_text("You need to reply to a ride request to send an invoice")
@@ -252,17 +257,17 @@ async def precheckout_callback(update: Update, context: CallbackContext):
         # After successfully receiving payment
         await context.bot.send_message(
              chat_id= query.from_user.id,
-             text= "Thank you for your payment. A biker is now coming to pick you up."
+             text= "🙏 Thank you for your payment 🏍 A motorcycle is coming to pick you up"
              )
         # Notify the seller
         await context.bot.send_message(
-            chat_id=biker_id, text=f"Good news! The payment went through. Now go get your rider! In case you need to contact them, their Telegram phone number is {query.order_info['phone_number']}."
+            chat_id=biker_id, text=f"🤘 Good news! Your €{query.total_amount/100} invoice was paid by {query.from_user.first_name} 💸 Now go get 'em! 🤙 Their phone number is +{query.order_info['phone_number']}, just in case 😉"
         )
     except Exception as e:
         # Log the error
         logging.error(f"An error occurred while processing the payment: {e}")
         # Answer the pre-checkout query with an error message
-        await query.answer(ok=False, error_message="An error occurred while processing your payment. Please try again.")
+        await query.answer(ok=False, error_message="An error occurred while processing your payment. Please try again")
         return
 
     # If no errors occurred, answer the pre-checkout query with ok=True
@@ -273,7 +278,7 @@ async def successful_payment_callback(update: Update, context: CallbackContext) 
     # Now you can use the information in the SuccessfulPayment object
     await context.bot.send_message(
         chat_id='812832007',
-        text=f"~$UCCE$$: {successful_payment}"
+        text=f"~$UCCE$$: USER ID: {update.message.from_user.id} {update.message.from_user.username} paid! {successful_payment}"
     )
 
 async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
