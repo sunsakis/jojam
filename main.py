@@ -63,7 +63,7 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
         print(location_address)
         if any(city in location_address for city in cities):
             await update.message.reply_text(
-                'Thanks for sharing your pick-up spot. To set your destination: click 🧷 icon, then 📍 Location, and use the map to 📌 pin where you want to be dropped-off'
+                'Thanks for sharing your pick-up spot. To set your destination - click 🧷 icon, then 📍 Location, and use the map to 📌 pin where you want to be dropped-off'
             )
             context.user_data['state'] = 'DESTINATION'
         else:
@@ -108,7 +108,7 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
                 polyline = route['overview_polyline']['points']
                 # Generate a static map URL with the route
                 static_map_url = f"https://maps.googleapis.com/maps/api/staticmap?size=600x600&path=enc:{polyline}&key={GOOGLE_MAPS_API_KEY}"
-                await update.message.reply_text('👍 Great! Motorcyclists have been notified of your ride request 🏍 Give some time for one of them to respond 🏁 To start over - type /start')
+                await update.message.reply_text('👍 Great! Motorcyclists have been notified of your ride request 🏍 Give some time for one of them to respond 🏁')
             
             else:
                 await context.bot.send_message(
@@ -136,8 +136,8 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
                         chat_id=chat_id,
                         text='NEW RIDE REQUEST from {}! Pick-up: {}. Drop-off: {}.'.format(
                             update.message.from_user.first_name,
-                            biker_ids[chat_id] == location_address.split(',')[0],
-                            biker_ids[chat_id] == destination_address.split(',')[0]
+                            location_address.split(',')[0],
+                            destination_address.split(',')[0]
                         ),
                         reply_markup=ForceReply(selective=True, input_field_placeholder='/invoice'),
                     )
@@ -259,14 +259,13 @@ async def invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 send_phone_number_to_provider=True,
             )
             #await update.message.reply_text(f'Invoice sent for {price_in_eur} euros')
-            await update.message.reply_text(f'💸 Invoice sent for €{price_in_eur} ⏱ You will be notified as soon as it is paid, after which you will have {min} min to pick your customer up ☠️ If you do not pick them up within that time window, the payment can be refunded and you might be penalized')
+            await update.message.reply_text(f'Invoice sent for €{price_in_eur} 💸 You will be notified as soon as it is paid, after which you will have {min} min to pick your customer up ⏱ If you do not pick them up within that time window, the payment might be refunded')
     else:
         #await update.message.reply_text("You need to reply to a customer's message to send them an invoice")
         await update.message.reply_text("You need to reply to a ride request to send an invoice")
 
 async def precheckout_callback(update: Update, context: CallbackContext):
     query: PreCheckoutQuery = update.pre_checkout_query
-    print(query)
     # Check the payload, is this from your bot?
     if query.invoice_payload != "Ride":
         await query.answer(ok=False, error_message="Something went wrong...")
@@ -281,7 +280,7 @@ async def precheckout_callback(update: Update, context: CallbackContext):
              )
         # Notify the seller
         await context.bot.send_message(
-            chat_id=biker_id, text=f"🤘 Good news! Your €{query.total_amount/100} invoice was paid by {query.from_user.first_name} 💸 Now go get 'em! 🤙 Their phone number is +{query.order_info['phone_number']}, just in case 😉"
+            chat_id=biker_id, text=f"🤘 Good news! Your €{query.total_amount/100} invoice was paid by {query.from_user.first_name} 💸 Now go get 'em! Their phone number is +{query.order_info['phone_number']}, just in case 😉"
         )
     except Exception as e:
         # Log the error
