@@ -53,14 +53,27 @@ async def start(update: Update, context: CallbackContext) -> None:
 
 async def handle_location(update: Update, context: CallbackContext) -> None:
     print(context.user_data['state'])
-    print(update.message.location)
     if context.user_data['state'] == 'USER_LOCATION':
         user_location = update.message.location
         context.user_data['USER_LOCATION'] = user_location
-        await update.message.reply_text(
-            'Thanks for sharing your pick-up location. Now click 🧷 icon, then 📍 Location again, and 📌 pin your destination on the map'
-        )
-        context.user_data['state'] = 'DESTINATION'
+        location_address = gmaps.reverse_geocode((context.user_data['USER_LOCATION'].latitude, context.user_data['USER_LOCATION'].longitude))
+        # Extract the city from the geocode
+        location_address = ','.join(location_address[0]['formatted_address'].split(',')[:3]).strip()
+        cities = list(biker_ids.values())
+        print(location_address)
+        if any(city in location_address for city in cities):
+            await update.message.reply_text(
+                'Thanks for sharing your pick-up spot. To set your destination: click 🧷 icon, then 📍 Location, and use the map to 📌 pin where you want to be dropped-off'
+            )
+            context.user_data['state'] = 'DESTINATION'
+        else:
+            await update.message.reply_text(
+                'No riders available in this area. Become the first one by typing /join'
+            )
+            # List of biker cities
+            cities = ', '.join(biker_ids.values())
+            await update.message.reply_text(f'Current biker cities: {cities}')
+            return
 
     elif context.user_data['state'] == 'DESTINATION':
         user_destination = update.message.location
@@ -95,7 +108,7 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
                 polyline = route['overview_polyline']['points']
                 # Generate a static map URL with the route
                 static_map_url = f"https://maps.googleapis.com/maps/api/staticmap?size=600x600&path=enc:{polyline}&key={GOOGLE_MAPS_API_KEY}"
-                await update.message.reply_text('👍 Great! Motorcyclists have been notified of your ride request 🏍 Give some time for one of them to respond 🏁 If you want to start over, type /start')
+                await update.message.reply_text('👍 Great! Motorcyclists have been notified of your ride request 🏍 Give some time for one of them to respond 🏁 To start over - type /start')
             
             else:
                 await context.bot.send_message(
@@ -111,23 +124,25 @@ async def handle_location(update: Update, context: CallbackContext) -> None:
         # Send user location, destination and price to the biker
         for chat_id in biker_ids:
             # Skip if user == biker
-            if int(chat_id) != int(update.message.from_user.id): 
-                # Send the route to every biker
-                await context.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=static_map_url
-                ) 
-                msg = await context.bot.send_message(
-                    chat_id=chat_id,
-                    text='NEW RIDE REQUEST from {}! Pick-up: {}. Drop-off: {}.'.format(
-                        update.message.from_user.first_name,
-                        location_address,
-                        destination_address
-                    ),
-                    reply_markup=ForceReply(selective=True, input_field_placeholder='/invoice'),
-                )
-                # Store messageID and userID
-                ride_requests[msg.message_id] = user_id
+            if int(chat_id) != int(update.message.from_user.id):
+                # Skip if biker is not in the same city as the user
+                if biker_ids[chat_id] in location_address:
+                    # Send the route to every biker
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=static_map_url
+                    ) 
+                    msg = await context.bot.send_message(
+                        chat_id=chat_id,
+                        text='NEW RIDE REQUEST from {}! Pick-up: {}. Drop-off: {}.'.format(
+                            update.message.from_user.first_name,
+                            biker_ids[chat_id] == location_address.split(',')[0],
+                            biker_ids[chat_id] == destination_address.split(',')[0]
+                        ),
+                        reply_markup=ForceReply(selective=True, input_field_placeholder='/invoice'),
+                    )
+                    # Store messageID and userID
+                    ride_requests[msg.message_id] = user_id
 
     elif context.user_data['state'] == 'BIKER_LOCATION':
         biker_location = update.edited_message.location
@@ -172,15 +187,20 @@ async def handle_city(update: Update, context: CallbackContext) -> None:
         biker_id = context.user_data['chat_id']
         biker_ids[str(biker_id)] = city
         save_chat_ids(biker_ids)
-        await update.message.reply_text('You will be notified when someone needs a motorcycle ride in {}'.format(city))
+        await update.message.reply_text('Welcome to the biker gang, {name}. You will be notified when someone needs a motorcycle ride in {}'.format(city))
         invite_link = 'https://t.me/+Vt6wj3ww_LY5NDI8'
-        await update.message.reply_text(f'[Join the biker gang:]({invite_link})', parse_mode='Markdown')
+        await update.message.reply_text(f'[Join the chat:]({invite_link})', parse_mode='Markdown')
         context.user_data['state'] = 'IDLE'
 
 async def help():
     return 'Contact @sunsakis if you need anything'
 
 async def join(update: Update, context: CallbackContext) -> None:
+    # Delete command message
+    await context.bot.delete_message(
+        chat_id=update.message.chat_id,
+        message_id=update.message.message_id
+    )
     context.user_data['state'] = 'CITY'
     chat_id = update.effective_chat.id
     name = update.effective_user.first_name
@@ -188,7 +208,7 @@ async def join(update: Update, context: CallbackContext) -> None:
         context.user_data['chat_id'] = chat_id
         context.user_data['state'] = 'CITY'
         save_chat_ids(biker_ids)
-        await update.message.reply_text(f'Welcome to the biker gang, {name}. Write the name of the city you ride in')
+        await update.message.reply_text(f'Write the name of the city you ride in')
     else:
         await update.message.reply_text(f'Already in the gang, {name}. Write the name of the city you ride in')
         context.user_data['chat_id'] = chat_id
